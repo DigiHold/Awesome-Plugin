@@ -1,0 +1,110 @@
+.plugin-license-box {
+  max-width: 800px;
+  margin: 20px 0;
+  background: #fff;
+  border: 1px solid #ccd0d4;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04);
+}
+
+.plugin-license-box .license-header {
+  padding: 12px 15px;
+  border-bottom: 1px solid #ccd0d4;
+  background: #f8f9f9;
+}
+
+.plugin-license-box .license-header h2 {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.plugin-license-box .license-body {
+  padding: 15px;
+}
+
+.plugin-license-box .license-info > div {
+  margin-bottom: 10px;
+}
+
+.plugin-license-box .license-info label {
+  display: inline-block;
+  min-width: 100px;
+  font-weight: 600;
+}
+
+.plugin-license-box .license-info code {
+  padding: 3px 5px;
+  font-size: 13px;
+  background: #f0f0f1;
+  border-radius: 3px;
+}
+
+.plugin-license-box .status-active {
+  color: #46b450;
+  font-weight: 500;
+}
+
+.plugin-license-box .status-invalid {
+  color: #dc3232;
+  font-weight: 500;
+}
+
+.plugin-license-box form label {
+  display: block;
+  margin-bottom: 5px;
+  font-weight: 600;
+}
+
+.plugin-license-box form input[type="text"] {
+  margin-bottom: 15px;
+}
+
+.plugin-license-box .license-actions {
+  margin-top: 20px;
+  padding-top: 15px;
+  border-top: 1px solid #eee;
+}
+
+.plugin-license-box .license-actions button {
+  margin-right: 10px;
+}
+
+.license-message {
+  margin: 20px 0;
+  padding: 12px 15px;
+  border-left: 4px solid #fff;
+  background: #fff;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04);
+}
+
+.license-message.message-success {
+  border-left-color: #46b450;
+}
+
+.license-message.message-error {
+  border-left-color: #dc3232;
+}
+
+.license-message.message-info {
+  border-left-color: #00a0d2;
+}
+
+/* Loading state */
+.plugin-license-box button:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+/* Improved responsive design */
+@media screen and (max-width: 782px) {
+  .plugin-license-box .license-info label {
+    display: block;
+    margin-bottom: 4px;
+  }
+
+  .plugin-license-box .license-actions button {
+    display: block;
+    width: 100%;
+    margin: 0 0 10px;
+  }
+}
