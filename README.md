@@ -18,6 +18,6 @@ Open the main plugin file and update these 3 constants:
 
 ```php
 // API Configuration - Update these for your licensing server
-define('AWESOME_API_URL', 'https://your-licensing-server.com');     // Your DigiCommerce site URL
-define('AWESOME_PLUGIN_SLUG', 'your-product-slug');                 // Your product slug in DigiCommerce
-define('AWESOME_PLUGIN_NAME', 'Your Product Name');                 // Your product display name
+define('AWESOME_API_URL', 'https://your-website.com');     // Your DigiCommerce site URL
+define('AWESOME_PLUGIN_SLUG', 'your-product-slug');        // Your product slug in DigiCommerce
+define('AWESOME_PLUGIN_NAME', 'Your Product Name');        // Your product display name
