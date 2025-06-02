@@ -11,31 +11,43 @@
  * Requires PHP: 7.4
  */
 
-if ( ! defined( 'ABSPATH' ) ) {
-	exit;
+// Prevent direct access
+if (!defined('ABSPATH')) {
+    exit;
 }
 
-define('DIGI_API_URL', 'https://test.ppvaya.com');
-define('DIGI_PLUGIN_SLUG', 'awesome-plugin');
-define('DIGI_PLUGIN_NAME', 'Awesome Plugin');
-define('DIGI_PLUGIN_BASENAME', plugin_basename(__FILE__));
+// Define plugin constants
+define('AWESOME_PLUGIN_VERSION', '1.0.0');
+define('AWESOME_PLUGIN_FILE', __FILE__);
+define('AWESOME_PLUGIN_PATH', plugin_dir_path(__FILE__));
+define('AWESOME_PLUGIN_URL', plugin_dir_url(__FILE__));
+define('AWESOME_PLUGIN_BASENAME', plugin_basename(__FILE__));
 
-class Plugin_License_Checker {
+// API Configuration - CHANGE THESE FOR YOUR PRODUCT
+define('AWESOME_API_URL', 'https://your-website.com');
+define('AWESOME_PLUGIN_SLUG', 'your-product-slug');
+define('AWESOME_PLUGIN_NAME', 'Your Product Name');
+
+/**
+ * Main Plugin License Manager Class
+ */
+class Awesome_Plugin_License_Manager {
+    
     private static $instance = null;
     private $api_url;
-    private $plugin_slug;
+    private $product_slug;
     private $plugin_name;
     private $version;
     private $basename;
-    private $plugin_path;
-	private const LICENSE_CACHE_DURATION = 12 * HOUR_IN_SECONDS;
-	private const UPDATE_CHECK_DURATION = 12 * HOUR_IN_SECONDS;
-	private const API_FAILURE_DURATION = HOUR_IN_SECONDS;
+    private $plugin_file;
+    
+    // Cache durations
+    private const LICENSE_CACHE_DURATION = 12 * HOUR_IN_SECONDS;
+    private const UPDATE_CHECK_DURATION = 12 * HOUR_IN_SECONDS;
 
-    public static function init() {
-        return self::instance();
-    }
-
+    /**
+     * Get singleton instance
+     */
     public static function instance() {
         if (is_null(self::$instance)) {
             self::$instance = new self();
@@ -43,228 +55,128 @@ class Plugin_License_Checker {
         return self::$instance;
     }
 
+    /**
+     * Constructor
+     */
     private function __construct() {
-        // First, load the textdomain
-        add_action('init', array($this, 'load_plugin_textdomain'));
-        
-        // Then initialize everything else
-        add_action('init', array($this, 'initialize'), 20);
-        
-        // These actions don't involve translations, so they can be added here
-        add_action('admin_enqueue_scripts', array($this, 'enqueue_assets'));
-        add_filter('pre_set_site_transient_update_plugins', array($this, 'modify_plugins_transient'));
-        add_filter('plugins_api', array($this, 'modify_plugin_details'), 10, 3);
+        // Initialize plugin properties
+        $this->product_slug = AWESOME_PLUGIN_SLUG;
+        $this->plugin_name = AWESOME_PLUGIN_NAME;
+        $this->version = AWESOME_PLUGIN_VERSION;
+        $this->basename = AWESOME_PLUGIN_BASENAME;
+        $this->plugin_file = AWESOME_PLUGIN_FILE;
+        $this->api_url = trailingslashit(AWESOME_API_URL) . 'wp-json/digicommerce/v2';
 
-		// Cache clearing
-		add_action('upgrader_process_complete', array($this, 'clear_caches'), 10, 2);
-		add_action('activated_plugin', array($this, 'clear_caches'));
-		add_action('deactivated_plugin', array($this, 'clear_caches'));
-		add_action('deleted_plugin', array($this, 'clear_caches'));
-	
-		// Clear caches when WordPress core updates
-		add_action('update_option_WPLANG', array($this, 'clear_caches'));
-		add_action('wp_version_check', array($this, 'clear_caches'));
-	
-		// Clear caches when switching themes (which might affect compatibility)
-		add_action('switch_theme', array($this, 'clear_caches'));
+        // Initialize hooks
+        $this->init_hooks();
     }
 
-    public function initialize() {
-        $this->plugin_slug = DIGI_PLUGIN_SLUG;
-        $this->plugin_name = DIGI_PLUGIN_NAME;
-        $this->basename = DIGI_PLUGIN_BASENAME;
-        $this->plugin_path = WP_PLUGIN_DIR . '/' . $this->basename;
-
-        // Get plugin version
-        if (!function_exists('get_plugin_data')) {
-            require_once(ABSPATH . 'wp-admin/includes/plugin.php');
-        }
-        $plugin_data = get_plugin_data($this->plugin_path);
-        $this->version = $plugin_data['Version'];
-        
-        // Set API URL from constant
-        $this->api_url = trailingslashit(DIGI_API_URL) . 'wp-json/digicommerce/v2';
-
-        // Add menu and AJAX handlers after translations are loaded
+    /**
+     * Initialize WordPress hooks
+     */
+    private function init_hooks() {
+        // Admin hooks
         add_action('admin_menu', array($this, 'add_license_menu'));
-        add_action('wp_ajax_' . $this->plugin_slug . '_activate_license', array($this, 'ajax_activate_license'));
-        add_action('wp_ajax_' . $this->plugin_slug . '_deactivate_license', array($this, 'ajax_deactivate_license'));
-        add_action('wp_ajax_' . $this->plugin_slug . '_verify_license', array($this, 'ajax_verify_license'));
+        add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_assets'));
+        
+        // AJAX handlers
+        add_action('wp_ajax_' . $this->product_slug . '_activate_license', array($this, 'ajax_activate_license'));
+        add_action('wp_ajax_' . $this->product_slug . '_deactivate_license', array($this, 'ajax_deactivate_license'));
+        add_action('wp_ajax_' . $this->product_slug . '_verify_license', array($this, 'ajax_verify_license'));
+
+        // Update system hooks
+        add_filter('pre_set_site_transient_update_plugins', array($this, 'check_for_updates'));
+        add_filter('plugins_api', array($this, 'plugin_information'), 10, 3);
+
+        // Cache management hooks
+        add_action('upgrader_process_complete', array($this, 'clear_update_caches'), 10, 2);
+        add_action('activated_plugin', array($this, 'clear_license_cache'));
+        add_action('deactivated_plugin', array($this, 'clear_license_cache'));
     }
 
-    public function load_plugin_textdomain() {
-        load_plugin_textdomain(
-            DIGI_PLUGIN_SLUG,
-            false,
-            dirname(plugin_basename(__FILE__)) . '/languages/'
-        );
-    }
-
-	public function clear_caches($upgrader = null, $options = array()) {
-		// If this is a plugin update, only clear if it's our plugin
-		if (!empty($options['type']) && $options['type'] === 'plugin' && 
-			!empty($options['plugins']) && is_array($options['plugins'])) {
-			if (!in_array($this->basename, $options['plugins'])) {
-				return;
-			}
-		}
-	
-		delete_transient($this->plugin_slug . '_license_check');
-		delete_transient($this->plugin_slug . '_update_check');
-		wp_cache_delete($this->plugin_slug . '_license_status', 'options');
-		
-		// Clear any API failure caches
-		global $wpdb;
-		$wpdb->query(
-			$wpdb->prepare(
-				"DELETE FROM {$wpdb->options} WHERE option_name LIKE %s",
-				$wpdb->esc_like('_transient_' . $this->plugin_slug . '_api_failure_') . '%'
-			)
-		);
-	}
-
+    /**
+     * Add license management menu
+     */
     public function add_license_menu() {
         add_options_page(
-            $this->plugin_name . ' ' . esc_html__('License', 'awesome-plugin'),
-            $this->plugin_name . ' ' . esc_html__('License', 'awesome-plugin'),
+            $this->plugin_name . ' ' . __('License', 'awesome-plugin'),
+            $this->plugin_name,
             'manage_options',
-            $this->plugin_slug . '-license',
+            $this->product_slug . '-license',
             array($this, 'render_license_page')
         );
     }
 
-    public function render_license_page() {
-        $license_data = get_option($this->plugin_slug . '_license_data', array());
-        $license_key = get_option($this->plugin_slug . '_license_key');
-        ?>
-        <div class="wrap">
-            <h1><?php echo esc_html($this->plugin_name . ' ' . esc_html__('License', 'awesome-plugin')); ?></h1>
+    /**
+     * Enqueue admin assets
+     */
+    public function enqueue_admin_assets($hook) {
+        if ('settings_page_' . $this->product_slug . '-license' !== $hook) {
+            return;
+        }
 
-            <div class="license-message" id="license-message" style="display: none;"></div>
+        wp_enqueue_style(
+            $this->product_slug . '-admin',
+            AWESOME_PLUGIN_URL . 'assets/css/license.css',
+            array(),
+            $this->version
+        );
 
-            <div class="plugin-license-box">
-                <div class="license-header">
-                    <h2><?php _e('License Information', 'awesome-plugin'); ?></h2>
-                </div>
-                <div class="license-body">
-                    <?php if (empty($license_key)) : ?>
-                        <form id="license-form" method="post">
-                            <label for="license_key"><?php _e('License Key', 'awesome-plugin'); ?></label>
-                            <input type="text" id="license_key" name="license_key" class="regular-text" 
-							placeholder="<?php esc_attr_e('Enter your license key', 'awesome-plugin'); ?>" required>
-                            
-                            <button type="submit" id="activate-license" class="button button-primary">
-                                <?php _e('Activate License', 'awesome-plugin'); ?>
-                            </button>
-                        </form>
-                    <?php else : ?>
-                        <div id="license-info">
-                            <div class="license-info">
-                                <div class="license-key">
-                                    <label><?php _e('License Key:', 'awesome-plugin'); ?></label>
-                                    <code><?php echo esc_html(substr($license_key, 0, 8) . '********************************'); ?></code>
-                                </div>
-                                
-                                <div class="license-status">
-                                    <label><?php _e('Status:', 'awesome-plugin'); ?></label>
-                                    <span class="status-<?php echo esc_attr($license_data['status'] ?? 'invalid'); ?>">
-                                        <?php echo esc_html(ucfirst($license_data['status'] ?? 'invalid')); ?>
-                                    </span>
-                                </div>
+        wp_enqueue_script(
+            $this->product_slug . '-admin',
+            AWESOME_PLUGIN_URL . 'assets/js/license.js',
+            array(),
+            $this->version,
+            true
+        );
 
-                                <?php if (!empty($license_data['expires_at'])) : ?>
-                                    <div class="license-expiry">
-                                        <label><?php _e('Expires:', 'awesome-plugin'); ?></label>
-                                        <span><?php echo esc_html(date_i18n(get_option('date_format'), strtotime($license_data['expires_at']))); ?></span>
-                                    </div>
-                                <?php endif; ?>
-                            </div>
-
-                            <div class="license-actions">
-                                <button type="button" id="verify-license" class="button button-secondary">
-                                    <?php _e('Verify License', 'awesome-plugin'); ?>
-                                </button>
-
-                                <button type="button" id="deactivate-license" class="button">
-                                    <?php _e('Deactivate License', 'awesome-plugin'); ?>
-                                </button>
-                            </div>
-                        </div>
-                    <?php endif; ?>
-                </div>
-            </div>
-        </div>
-        <?php
+        wp_localize_script(
+            $this->product_slug . '-admin',
+            'awesomeLicense',
+            array(
+                'ajaxUrl' => admin_url('admin-ajax.php'),
+                'nonce' => wp_create_nonce($this->product_slug . '_license_nonce'),
+                'pluginSlug' => $this->product_slug,
+                'strings' => array(
+                    'activating' => __('Activating...', 'awesome-plugin'),
+                    'deactivating' => __('Deactivating...', 'awesome-plugin'),
+                    'verifying' => __('Verifying...', 'awesome-plugin'),
+                    'confirmDeactivate' => __('Are you sure you want to deactivate this license?', 'awesome-plugin'),
+                    'error' => __('An error occurred. Please try again.', 'awesome-plugin'),
+                    'enterLicenseKey' => __('Please enter a license key', 'awesome-plugin'),
+                    'licenseActivated' => __('License activated successfully!', 'awesome-plugin'),
+                    'licenseDeactivated' => __('License deactivated successfully!', 'awesome-plugin'),
+                    'licenseVerified' => __('License verified successfully!', 'awesome-plugin')
+                )
+            )
+        );
     }
 
-	private function request($endpoint, $license_key = null) {
-		// Check for recent API failures
-		$failure_key = $this->plugin_slug . '_api_failure_' . $endpoint;
-		if (get_transient($failure_key)) {
-			return new WP_Error('api_throttled', 'API requests temporarily disabled');
-		}
+    /**
+     * Make API request
+     */
+    private function make_api_request($endpoint, $body = array()) {
+        // Always include product slug for validation (this is the key fix!)
+        $body['product_slug'] = $this->product_slug;
 
-		// Build request URL
-		$request_url = $this->api_url . '/' . $endpoint;
-	
-		// Prepare the request body
-		$body = array(
-			'site_url' => home_url()
-		);
-	
-		if ($license_key) {
-			$body['license_key'] = $license_key;
-		}
-	
-		// Auto-detect development sites
-		if ($this->is_development_site()) {
-			$body['site_type'] = 'development';
-		}
-		
-		$request_args = array(
-			'timeout' => 15,
-			'headers' => array(
-				'Content-Type' => 'application/json',
-				'Accept' => 'application/json',
-				'X-Site-URL' => home_url(),
-				'X-Plugin-Slug' => $this->plugin_slug
-			),
-			'body' => wp_json_encode($body),
-			'data_format' => 'body'
-		);
-	
-		$response = wp_remote_post($request_url, $request_args);
-	
-		if (is_wp_error($response)) {
-			// Cache failure for 1 hour
-			set_transient($failure_key, true, HOUR_IN_SECONDS);
-			return $response;
-		}
-	
-		$response_code = wp_remote_retrieve_response_code($response);
-		$response_body = wp_remote_retrieve_body($response);
-		
-		if ($response_code !== 200) {
-			$error_message = wp_remote_retrieve_response_message($response);
-			return new WP_Error('server_error', $error_message ?: 'Unknown server error');
-		}
-		
-		$json = json_decode($response_body, true);
-		if (!$json) {
-			return new WP_Error('json_error', 'Invalid response format');
-		}
-	
-		return $json;
-	}
+        return wp_remote_post(
+            trailingslashit($this->api_url) . $endpoint,
+            array(
+                'timeout' => 15,
+                'body'    => $body,
+            )
+        );
+    }
 
     /**
-     * Check if current site is a development site
+     * Detect site type (production, staging, development)
      */
-    private function is_development_site() {
-        $site_url = home_url();
-        $host = parse_url($site_url, PHP_URL_HOST);
-        
-        // Common development TLDs and patterns
+    private function is_development_site($site_url) {
+        $host = wp_parse_url($site_url, PHP_URL_HOST);
+        if (!$host) {
+            return false;
+        }
+
         $dev_patterns = array(
             '/\.local$/',
             '/\.test$/',
@@ -278,415 +190,530 @@ class Plugin_License_Checker {
             '/^127\.\d+\.\d+\.\d+$/',
             '/^192\.168\./',
             '/^10\./',
-            '/^172\.(1[6-9]|2[0-9]|3[0-1])\./'
+            '/^172\.(1[6-9]|2[0-9]|3[0-1])\./',
         );
-        
+
         foreach ($dev_patterns as $pattern) {
             if (preg_match($pattern, $host)) {
                 return true;
             }
         }
-        
+
         return false;
     }
 
-    public function modify_plugins_transient($transient) {
-		if (empty($transient->checked)) {
-			return $transient;
-		}
-	
-		// Check update cache
-		$cache_key = $this->plugin_slug . '_update_check';
-		$cached = get_transient($cache_key);
-		if (false !== $cached) {
-			if (isset($cached['update'])) {
-				$transient->response[$this->basename] = (object)$cached['update'];
-			}
-			return $transient;
-		}
-	
-		// Skip if license is not valid
-		if (!$this->is_license_valid()) {
-			return $transient;
-		}
-	
-		$license_key = get_option($this->plugin_slug . '_license_key');
-		$response = $this->request('license/updates', $license_key);
-	
-		if (is_wp_error($response) || empty($response)) {
-			return $transient;
-		}
-	
-		// Handle icon
-		$icons = !empty($response['icons']) ? (array)$response['icons'] : array();
-	
-		// Check if update is available
-		if (!empty($response['new_version']) && version_compare($this->version, $response['new_version'], '<')) {
-			$update_data = array(
-				'slug' => $this->plugin_slug,
-				'plugin' => $this->basename,
-				'new_version' => $response['new_version'],
-				'package' => $response['package'] ?? '',
-				'tested' => $response['tested'] ?? '',
-				'icons' => $icons,
-			);
-			
-			$transient->response[$this->basename] = (object)$update_data;
-			
-			// Cache results for 12 hours
-			set_transient($cache_key, array('update' => $update_data), self::LICENSE_CACHE_DURATION);
-		}
-	
-		return $transient;
-	}
+    /**
+     * Get license details with caching
+     */
+    private function get_license_details() {
+        // Try to get cached license details first.
+        $cached = get_transient($this->product_slug . '_license_details');
+        if (false !== $cached) {
+            return $cached;
+        }
 
-    public function modify_plugin_details($result, $action, $args) {
-		if ($action !== 'plugin_information' || $args->slug !== $this->plugin_slug) {
-			return $result;
-		}
-	
-		if (!$this->is_license_valid()) {
-			return $result;
-		}
-	
-		// Get license info for updates
-		$license_key = get_option($this->plugin_slug . '_license_key');
-		$response = $this->request('license/updates', $license_key);
-	
-		if (is_wp_error($response)) {
-			return $result;
-		}
-	
-		// Format description - WordPress style formatting
-		$description = '';
-		if (!empty($response['description'])) {
-			$description = $response['description'];
-			// Convert \n\n to double line breaks
-			$description = str_replace('\n\n', "\n\n", $description);
-			// Convert remaining \n to single line breaks
-			$description = str_replace('\n', "\n", $description);
-			// Fix bullet points that have extra spaces
-			$description = preg_replace('/\* \n/', "* ", $description);
-			// Remove any double spaces
-			$description = preg_replace('/\s+/', ' ', $description);
-			// Ensure proper spacing around headings
-			$description = preg_replace('/\n(#+)/', "\n\n$1", $description);
-		}
-	
-		// Format installation - WordPress style formatting
-		$installation = '';
-		if (!empty($response['installation'])) {
-			$installation = $response['installation'];
-			$installation = str_replace('\n\n', "\n\n", $installation);
-			$installation = str_replace('\n', "\n", $installation);
-			// Format numbered list items
-			$installation = preg_replace('/(\d+)\. \n/', "$1. ", $installation);
-		}
-	
-		// Format changelog - WordPress style formatting with HTML structure
-		$changelog = '';
-		if (!empty($response['changelog']) && !empty($response['new_version'])) {
-			$changelog_items = explode("\n", str_replace('\n', "\n", $response['changelog']));
-			
-			$changelog = sprintf(
-				'<h4>%s</h4>' . "\n" .
-				'<p><em>Release Date %s</em></p>' . "\n" .
-				'<ul>' . "\n",
-				esc_html($response['new_version']),
-				esc_html(date_i18n(get_option('date_format')))
-			);
-	
-			foreach ($changelog_items as $item) {
-				$item = trim($item);
-				if (!empty($item)) {
-					$changelog .= sprintf('<li>%s</li>' . "\n", esc_html($item));
-				}
-			}
-	
-			$changelog .= '</ul>';
-		}
-	
-		// Merge the data
-		$info = (object) array(
-			// Basic plugin information
-			'name' => $this->plugin_name,
-			'slug' => $this->plugin_slug,
-			'version' => $response['new_version'] ?? '',
-			'download_link' => $response['package'] ?? '',
-			
-			// Metadata
-			'last_updated' => $response['last_updated'] ?? '',
-			'requires' => $response['requires'] ?? '',
-			'requires_php' => $response['requires_php'] ?? '',
-			'tested' => $response['tested'] ?? '',
-			
-			// Content
-			'homepage' => $response['homepage'] ?? '',
-			'sections' => array(
-				'description' => $description,
-				'installation' => $installation,
-				'changelog' => $changelog,
-				'upgrade_notice' => isset($response['upgrade_notice']) ? str_replace('\n', "\n", $response['upgrade_notice']) : ''
-			),
-			
-			// Author information
-			'author' => $response['author'] ?? '',
-			'author_homepage' => $response['homepage'] ?? '',
-			
-			// Visual assets
-			'banners' => (array) ($response['banners'] ?? array()),
-			
-			// Contributors
-			'contributors' => (array) ($response['contributors'] ?? array())
-		);
-	
-		// Remove empty sections
-		foreach ($info->sections as $key => $section) {
-			if (empty($section)) {
-				unset($info->sections[$key]);
-			}
-		}
-	
-		return $info;
-	}
+        $license_key = get_option($this->product_slug . '_license_key');
+        if (!$license_key) {
+            return false;
+        }
 
-    public function ajax_activate_license() {    
-        check_ajax_referer($this->plugin_slug . '_license_nonce', 'nonce');
-	
-		if (!current_user_can('manage_options')) {
-			wp_send_json_error('Insufficient permissions');
-		}
+        // Make API request to verify license.
+        $response = $this->make_api_request(
+            'license/verify',
+            array(
+                'license_key' => $license_key,
+                'site_url'    => home_url(),
+                'product_slug' => $this->product_slug,
+            )
+        );
 
-		$license_key = isset($_POST['license_key']) ? sanitize_text_field($_POST['license_key']) : '';
-		
-		if (empty($license_key)) {
-			wp_send_json_error('License key is required');
-		}
+        if (is_wp_error($response)) {
+            // If API request fails, use cached data if available.
+            $fallback = get_option($this->product_slug . '_license_status');
+            if ($fallback) {
+                return $fallback;
+            }
+            return false;
+        }
 
-		$response = $this->request('license/activate', $license_key);
-		
-		if (is_wp_error($response)) {
-			$error_message = $response->get_error_message();
-			wp_send_json_error($error_message);
-		}
+        $license_data = json_decode(wp_remote_retrieve_body($response), true);
 
-		if (isset($response['status']) && $response['status'] === 'success') {
-			update_option($this->plugin_slug . '_license_key', $license_key);
-			$license_data = array(
-				'status' => 'active',
-				'expires_at' => $response['expires_at'] ?? null,
-				'last_check' => current_time('mysql')
-			);
-			update_option($this->plugin_slug . '_license_data', $license_data);
-			
-			$transient_data = array(
-				'status' => 'active',
-				'expires_at' => $response['expires_at'] ?? null
-			);
-			set_transient(
-				$this->plugin_slug . '_license_check', 
-				$transient_data, 
-				self::LICENSE_CACHE_DURATION
-			);
+        // Cache the result for 12 hours.
+        set_transient($this->product_slug . '_license_details', $license_data, self::LICENSE_CACHE_DURATION);
 
-			wp_send_json_success(array(
-				'message' => esc_html__('License activated successfully', 'awesome-plugin'),
-				'license' => array(
-					'status' => 'active',
-					'expires_at' => $response['expires_at'] ?? null,
-					'key' => $license_key
-				)
-			));
-		}
+        // Also store as a fallback.
+        update_option($this->product_slug . '_license_status', $license_data);
 
-		$error_message = $response['message'] ?? 'License activation failed';
-		wp_send_json_error($error_message);
-	}
+        return $license_data;
+    }
 
+    /**
+     * AJAX: Activate license
+     */
+    public function ajax_activate_license() {
+        check_ajax_referer($this->product_slug . '_license_nonce', 'nonce');
+
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(array('message' => __('Insufficient permissions.', 'awesome-plugin')));
+        }
+
+        $license_key = isset($_POST['license_key']) ? sanitize_text_field(wp_unslash($_POST['license_key'])) : '';
+
+        if (empty($license_key)) {
+            wp_send_json_error(array('message' => __('Please enter a license key.', 'awesome-plugin')));
+        }
+
+        $response = $this->make_api_request(
+            'license/activate',
+            array(
+                'license_key' => $license_key,
+                'site_url'    => home_url(),
+                'site_type'   => $this->is_development_site(home_url()) ? 'development' : 'production',
+                'product_slug' => $this->product_slug,
+            )
+        );
+
+        if (is_wp_error($response)) {
+            wp_send_json_error(array('message' => $response->get_error_message()));
+        }
+
+        $result = json_decode(wp_remote_retrieve_body($response), true);
+
+        // Handle specific error for wrong product
+        if (!empty($result['code']) && 'wrong_product' === $result['code']) {
+            wp_send_json_error(array('message' => sprintf(__('This license is not valid for %s. Please check your license key.', 'awesome-plugin'), $this->plugin_name)));
+        }
+
+        if (!empty($result['status']) && 'success' === $result['status']) {
+            update_option($this->product_slug . '_license_key', $license_key);
+            delete_transient($this->product_slug . '_license_details');
+            wp_send_json_success(array('message' => __('License activated successfully!', 'awesome-plugin')));
+        }
+
+        wp_send_json_error(array('message' => $result['message'] ?? __('Failed to activate license.', 'awesome-plugin')));
+    }
+
+    /**
+     * AJAX: Deactivate license
+     */
     public function ajax_deactivate_license() {
+        check_ajax_referer($this->product_slug . '_license_nonce', 'nonce');
+
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(array('message' => __('Insufficient permissions.', 'awesome-plugin')));
+        }
+
+        $license_key = get_option($this->product_slug . '_license_key');
+        if (!$license_key) {
+            wp_send_json_error(array('message' => __('No license key found.', 'awesome-plugin')));
+        }
+
+        $response = $this->make_api_request(
+            'license/deactivate',
+            array(
+                'license_key' => $license_key,
+                'site_url'    => home_url(),
+                'product_slug' => $this->product_slug,
+            )
+        );
+
+        if (is_wp_error($response)) {
+            wp_send_json_error(array('message' => $response->get_error_message()));
+        }
+
+        $result = json_decode(wp_remote_retrieve_body($response), true);
+
+        if (!empty($result['status']) && 'success' === $result['status']) {
+            delete_option($this->product_slug . '_license_key');
+            delete_option($this->product_slug . '_license_status');
+            delete_transient($this->product_slug . '_license_details');
+            wp_send_json_success(array('message' => __('License deactivated successfully!', 'awesome-plugin')));
+        }
+
+        wp_send_json_error(array('message' => $result['message'] ?? __('Failed to deactivate license.', 'awesome-plugin')));
+    }
+
+    /**
+     * AJAX: Verify license
+     */
+    public function ajax_verify_license() {
         try {
-			check_ajax_referer($this->plugin_slug . '_license_nonce', 'nonce');
+            check_ajax_referer($this->product_slug . '_license_nonce', 'nonce');
 
             if (!current_user_can('manage_options')) {
-                wp_send_json_error('Insufficient permissions');
+                wp_send_json_error(array('message' => __('Insufficient permissions.', 'awesome-plugin')));
             }
 
-            $license_key = get_option($this->plugin_slug . '_license_key');
+            // Get license key and verify
+            $license_key = get_option($this->product_slug . '_license_key');
             if (!$license_key) {
-                wp_send_json_error('No license key found');
+                wp_send_json_error(array('message' => __('No license key found.', 'awesome-plugin')));
             }
 
-            $response = $this->request('license/deactivate', $license_key);
+            $response = $this->make_api_request(
+                'license/verify',
+                array(
+                    'license_key' => $license_key,
+                    'site_url'    => home_url(),
+                    'product_slug' => $this->product_slug,
+                )
+            );
 
             if (is_wp_error($response)) {
-                wp_send_json_error($response->get_error_message());
+                wp_send_json_error(array('message' => $response->get_error_message()));
             }
 
-            if (isset($response['status']) && $response['status'] === 'success') {
-				$this->clear_caches();
-				delete_option($this->plugin_slug . '_license_key');
-				delete_option($this->plugin_slug . '_license_status');
-                wp_send_json_success(array(
-                    'message' => esc_html__('License deactivated successfully', 'awesome-plugin')
+            // Decode the response body
+            $response_data = json_decode(wp_remote_retrieve_body($response), true);
+            
+            // Validate response data
+            if (!is_array($response_data)) {
+                throw new Exception(__('Invalid response from license server.', 'awesome-plugin'));
+            }
+
+            // Check for wrong product error
+            if (!empty($response_data['code']) && 'wrong_product' === $response_data['code']) {
+                // Delete all license data for wrong product
+                delete_option($this->product_slug . '_license_key');
+                delete_option($this->product_slug . '_license_status');
+                delete_transient($this->product_slug . '_license_details');
+                delete_transient($this->product_slug . '_update_check');
+
+                wp_send_json_error(array( 
+                    'message' => sprintf(__('This license is not valid for %s. License has been removed.', 'awesome-plugin'), $this->plugin_name)
                 ));
             }
 
-            wp_send_json_error($response['message'] ?? 'License deactivation failed');
+            // Update stored data
+            $license_data = array(
+                'status'     => isset($response_data['status']) ? sanitize_text_field($response_data['status']) : 'invalid',
+                'expires_at' => isset($response_data['expires_at']) ? sanitize_text_field($response_data['expires_at']) : null,
+                'last_check' => current_time('mysql'),
+            );
+
+            // If verification failed or license is invalid/expired
+            if ('active' !== $license_data['status'] || 
+                (!empty($license_data['expires_at']) && strtotime($license_data['expires_at']) < time())
+            ) {
+                // Delete all license data
+                delete_option($this->product_slug . '_license_key');
+                delete_option($this->product_slug . '_license_status');
+                delete_transient($this->product_slug . '_license_details');
+                delete_transient($this->product_slug . '_update_check');
+
+                wp_send_json_error(array( 
+                    'message' => __('License verification failed. Your license is no longer valid.', 'awesome-plugin')
+                ));
+            }
+
+            // Update stored data and cache
+            update_option($this->product_slug . '_license_status', $license_data);
+            set_transient($this->product_slug . '_license_details', $license_data, self::LICENSE_CACHE_DURATION);
+
+            wp_send_json_success(array(
+                'message' => __('License verified successfully.', 'awesome-plugin'),
+                'license' => array(
+                    'status'     => $license_data['status'],
+                    'expires_at' => $license_data['expires_at'],
+                    'key'        => $license_key,
+                ),
+            ));
 
         } catch (Exception $e) {
-            wp_send_json_error($e->getMessage());
+            wp_send_json_error(array('message' => $e->getMessage()));
         }
     }
 
-	private function verify_license() {
-		// Try transient cache first, but with better invalidation
-		$cache_key = $this->plugin_slug . '_license_check';
-		$cached = get_transient($cache_key);
-		
-		$license_key = get_option($this->plugin_slug . '_license_key');
-		if (!$license_key) {
-			return false;
-		}
-	
-		$response = $this->request('license/verify', $license_key);
-		
-		// If it's a WP_Error, THEN we can use cached data as fallback
-		if (is_wp_error($response)) {
-			$fallback = get_option($this->plugin_slug . '_license_status');
-			return $fallback ?: false;
-		}
-	
-		// Check for specific API response codes
-		if (isset($response['code']) && $response['code'] === 'verification_failed') {
-			// Clear all stored data since license is no longer valid
-			delete_option($this->plugin_slug . '_license_key');
-			delete_option($this->plugin_slug . '_license_status');
-			delete_transient($cache_key);
-			return false;
-		}
-	
-		$license_data = array(
-			'status' => $response['status'] ?? 'invalid',
-			'expires_at' => $response['expires_at'] ?? null,
-			'last_check' => current_time('mysql')
-		);
-	
-		// Only cache and store if the license is valid
-		if ($license_data['status'] === 'active') {
-			set_transient($cache_key, $license_data, self::LICENSE_CACHE_DURATION);
-			update_option($this->plugin_slug . '_license_status', $license_data);
-		} else {
-			// Clear cached data if license is not active
-			delete_transient($cache_key);
-			delete_option($this->plugin_slug . '_license_status');
-		}
-	
-		return $license_data;
-	}
-
-    private function is_license_valid() {
-        $license_data = $this->verify_license();
-        if (!$license_data) {
-            return false;
+    /**
+     * Check for plugin updates
+     */
+    public function check_for_updates($transient) {
+        if (empty($transient->checked)) {
+            return $transient;
         }
 
-        if ($license_data['status'] !== 'active') {
-            return false;
+        // Only check once per 12 hours.
+        $last_check = get_transient($this->product_slug . '_update_check');
+        if (false !== $last_check) {
+            return $transient;
         }
 
-        if (!empty($license_data['expires_at'])) {
-            $expires = strtotime($license_data['expires_at']);
-            if ($expires && $expires < time()) {
-                return false;
+        // Verify license first.
+        $license = $this->get_license_details();
+        if (!$license || 'active' !== $license['status']) {
+            return $transient;
+        }
+
+        $response = $this->make_api_request(
+            'license/updates',
+            array(
+                'license_key' => get_option($this->product_slug . '_license_key'),
+                'site_url'    => home_url(),
+                'product_slug' => $this->product_slug,
+            )
+        );
+
+        if (is_wp_error($response)) {
+            return $transient;
+        }
+
+        $update_data = json_decode(wp_remote_retrieve_body($response), true);
+
+        // Check for wrong product error
+        if (!empty($update_data['code']) && 'wrong_product' === $update_data['code']) {
+            // Clear license data and stop checking for updates
+            delete_option($this->product_slug . '_license_key');
+            delete_option($this->product_slug . '_license_status');
+            delete_transient($this->product_slug . '_license_details');
+            return $transient;
+        }
+
+        if (!empty($update_data['new_version']) && version_compare($this->version, $update_data['new_version'], '<')) {
+            $transient->response[$this->basename] = (object) array(
+                'slug'        => $this->product_slug,
+                'plugin'      => $this->basename,
+                'new_version' => $update_data['new_version'],
+                'package'     => $update_data['package'] ?? '',
+                'tested'      => $update_data['tested'] ?? '',
+                'requires'    => $update_data['requires'] ?? '',
+            );
+        }
+
+        // Cache the check for 12 hours.
+        set_transient($this->product_slug . '_update_check', true, self::UPDATE_CHECK_DURATION);
+
+        return $transient;
+    }
+
+    /**
+     * Plugin info for updates
+     */
+    public function plugin_information($result, $action, $args) {
+        // Only handle our plugin.
+        if ('plugin_information' !== $action || $this->product_slug !== $args->slug) {
+            return $result;
+        }
+
+        // Verify license.
+        $license = $this->get_license_details();
+        if (!$license || 'active' !== $license['status']) {
+            return $result;
+        }
+
+        $response = $this->make_api_request(
+            'license/updates',
+            array(
+                'license_key' => get_option($this->product_slug . '_license_key'),
+                'site_url'    => home_url(),
+                'product_slug' => $this->product_slug,
+            )
+        );
+
+        if (is_wp_error($response)) {
+            return $result;
+        }
+
+        $info = json_decode(wp_remote_retrieve_body($response), true);
+        if (empty($info)) {
+            return $result;
+        }
+
+        // Check for wrong product error
+        if (!empty($info['code']) && 'wrong_product' === $info['code']) {
+            return $result;
+        }
+
+        // Build response object
+        $plugin_info = (object) array(
+            'name'          => $this->plugin_name,
+            'slug'          => $this->product_slug,
+            'version'       => $info['new_version'] ?? '',
+            'download_link' => $info['package'] ?? '',
+            'last_updated'  => $info['last_updated'] ?? '',
+            'requires'      => $info['requires'] ?? '',
+            'requires_php'  => $info['requires_php'] ?? '',
+            'tested'        => $info['tested'] ?? '',
+            'homepage'      => $info['homepage'] ?? '',
+            'sections'      => array(
+                'description'    => $info['description'] ?? '',
+                'installation'   => $info['installation'] ?? '',
+                'changelog'      => $info['changelog'] ?? '',
+                'upgrade_notice' => $info['upgrade_notice'] ?? '',
+            ),
+            'author'        => $info['author'] ?? '',
+            'author_homepage' => $info['homepage'] ?? '',
+            'banners'       => (array) ($info['banners'] ?? array()),
+            'contributors'  => (array) ($info['contributors'] ?? array()),
+        );
+
+        return $plugin_info;
+    }
+
+    /**
+     * Clear license cache
+     */
+    public function clear_license_cache() {
+        delete_transient($this->product_slug . '_license_details');
+        delete_transient($this->product_slug . '_license_check');
+    }
+
+    /**
+     * Clear update caches
+     */
+    public function clear_update_caches($upgrader = null, $options = array()) {
+        // If this is a plugin update, only clear if it's our plugin
+        if (!empty($options['type']) && $options['type'] === 'plugin' && 
+            !empty($options['plugins']) && is_array($options['plugins'])) {
+            if (!in_array($this->basename, $options['plugins'])) {
+                return;
             }
         }
 
-        return true;
+        delete_transient($this->product_slug . '_update_check');
     }
 
-    public function ajax_verify_license() {
-		try {
-			check_ajax_referer($this->plugin_slug . '_license_nonce', 'nonce');
-	
-			if (!current_user_can('manage_options')) {
-				wp_send_json_error( __('Insufficient permissions', 'awesome-plugin') );
-			}
-	
-			$license_data = $this->verify_license();
-			
-			// If verification failed or license is invalid/expired
-			if (!$license_data || 
-				$license_data['status'] !== 'active' || 
-				(!empty($license_data['expires_at']) && strtotime($license_data['expires_at']) < time())) {
-				
-				// Delete all license data
-				delete_option($this->plugin_slug . '_license_key');
-				delete_option($this->plugin_slug . '_license_data');
-				delete_transient($this->plugin_slug . '_license_check');
-				
-				wp_send_json_error( __('License verification failed. Your license is no longer valid.', 'awesome-plugin') );
-			}
-	
-			wp_send_json_success(array(
-				'message' => __('License verified successfully', 'awesome-plugin'),
-				'license' => array(
-					'status' => $license_data['status'],
-					'expires_at' => $license_data['expires_at'],
-					'key' => get_option($this->plugin_slug . '_license_key')
-				)
-			));
-	
-		} catch (Exception $e) {
-			wp_send_json_error($e->getMessage());
-		}
-	}
+    /**
+     * Render license management page
+     */
+    public function render_license_page() {
+        $license_data = $this->get_license_details();
+        $license_key = get_option($this->product_slug . '_license_key');
+        $is_active = $license_data && isset($license_data['status']) && 'active' === $license_data['status'];
+        ?>
+        <div class="wrap">
+            <h1><?php echo esc_html($this->plugin_name . ' ' . __('License Management', 'awesome-plugin')); ?></h1>
+            
+            <div id="license-message" style="display: none;"></div>
 
-    public function enqueue_assets($hook) {
-        if ('settings_page_' . $this->plugin_slug . '-license' !== $hook) {
-            return;
-        }
+            <div class="card">
+                <h2><?php _e('License Information', 'awesome-plugin'); ?></h2>
+                
+                <?php if (empty($license_key) || !$is_active) : ?>
+                    <!-- License Activation Form -->
+                    <form id="license-form" method="post">
+                        <?php wp_nonce_field($this->product_slug . '_license_nonce', 'license_nonce'); ?>
+                        
+                        <table class="form-table">
+                            <tr>
+                                <th scope="row">
+                                    <label for="license_key"><?php _e('License Key', 'awesome-plugin'); ?></label>
+                                </th>
+                                <td>
+                                    <input type="text" 
+                                           id="license_key" 
+                                           name="license_key" 
+                                           class="regular-text" 
+                                           value="<?php echo esc_attr($license_key); ?>"
+                                           placeholder="<?php esc_attr_e('Enter your license key', 'awesome-plugin'); ?>" 
+                                           required>
+                                    <p class="description">
+                                        <?php printf(__('Enter your %s license key to activate updates and support.', 'awesome-plugin'), $this->plugin_name); ?>
+                                    </p>
+                                </td>
+                            </tr>
+                        </table>
+                        
+                        <p class="submit">
+                            <button type="submit" id="activate-license" class="button button-primary">
+                                <?php _e('Activate License', 'awesome-plugin'); ?>
+                            </button>
+                        </p>
+                    </form>
+                <?php else : ?>
+                    <!-- Active License Information -->
+                    <table class="form-table">
+                        <tr>
+                            <th scope="row"><?php _e('License Key:', 'awesome-plugin'); ?></th>
+                            <td>
+                                <code><?php echo esc_html(substr($license_key, 0, 8) . str_repeat('*', 24)); ?></code>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><?php _e('Status:', 'awesome-plugin'); ?></th>
+                            <td>
+                                <span class="license-status license-<?php echo esc_attr($license_data['status'] ?? 'invalid'); ?>">
+                                    <?php echo esc_html(ucfirst($license_data['status'] ?? 'Invalid')); ?>
+                                </span>
+                            </td>
+                        </tr>
+                        <?php if (!empty($license_data['expires_at'])) : ?>
+                        <tr>
+                            <th scope="row"><?php _e('Expires:', 'awesome-plugin'); ?></th>
+                            <td>
+                                <?php echo esc_html(date_i18n(get_option('date_format'), strtotime($license_data['expires_at']))); ?>
+                            </td>
+                        </tr>
+                        <?php endif; ?>
+                    </table>
 
-        wp_enqueue_style(
-            $this->plugin_slug . '-license',
-            plugin_dir_url(__FILE__) . 'assets/css/license.css',
-            array(),
-            $this->version
-        );
+                    <p class="submit">
+                        <button type="button" id="verify-license" class="button button-secondary">
+                            <?php _e('Verify License', 'awesome-plugin'); ?>
+                        </button>
+                        <button type="button" id="deactivate-license" class="button">
+                            <?php _e('Deactivate License', 'awesome-plugin'); ?>
+                        </button>
+                    </p>
+                <?php endif; ?>
+            </div>
 
-        wp_enqueue_script(
-            $this->plugin_slug . '-license',
-            plugin_dir_url(__FILE__) . 'assets/js/license.js',
-            array(),
-            $this->version,
-            true
-        );
-
-		wp_localize_script(
-            $this->plugin_slug . '-license',
-            'licenseManager',
-            array(
-                'ajaxUrl' => admin_url('admin-ajax.php'),
-                'nonce' => wp_create_nonce($this->plugin_slug . '_license_nonce'),
-                'pluginSlug' => $this->plugin_slug,
-                'i18n' => array(
-                    'activating' => esc_html__('Activating...', 'awesome-plugin'),
-                    'deactivating' => esc_html__('Deactivating...', 'awesome-plugin'),
-                    'verifying' => esc_html__('Verifying...', 'awesome-plugin'),
-                    'confirmDeactivate' => esc_html__('Are you sure you want to deactivate this license?', 'awesome-plugin'),
-                    'error' => esc_html__('An error occurred. Please try again.', 'awesome-plugin'),
-					'enterLicenseKey' => esc_html__('Please enter a license key', 'awesome-plugin')
-                )
-            )
-        );
+            <!-- Plugin Information -->
+            <div class="card">
+                <h2><?php _e('Plugin Information', 'awesome-plugin'); ?></h2>
+                <table class="form-table">
+                    <tr>
+                        <th scope="row"><?php _e('Version:', 'awesome-plugin'); ?></th>
+                        <td><?php echo esc_html($this->version); ?></td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><?php _e('Updates:', 'awesome-plugin'); ?></th>
+                        <td>
+                            <?php if ($is_active) : ?>
+                                <span class="dashicons dashicons-yes" style="color: #46b450;"></span>
+                                <?php _e('Automatic updates enabled', 'awesome-plugin'); ?>
+                            <?php else : ?>
+                                <span class="dashicons dashicons-no" style="color: #dc3232;"></span>
+                                <?php _e('Activate license to enable updates', 'awesome-plugin'); ?>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><?php _e('Support:', 'awesome-plugin'); ?></th>
+                        <td>
+                            <?php if ($is_active) : ?>
+                                <span class="dashicons dashicons-yes" style="color: #46b450;"></span>
+                                <?php _e('Premium support available', 'awesome-plugin'); ?>
+                            <?php else : ?>
+                                <span class="dashicons dashicons-no" style="color: #dc3232;"></span>
+                                <?php _e('Activate license to access support', 'awesome-plugin'); ?>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+        <?php
     }
 }
 
-/**
- * Returns the main instance of the plugin
- */
-function Plugin_License_Checker() {
-	return Plugin_License_Checker::instance();
+// Initialize the plugin
+function awesome_plugin_init() {
+    return Awesome_Plugin_License_Manager::instance();
 }
 
-// Starting the plugin
-Plugin_License_Checker();
+// Start the plugin
+add_action('plugins_loaded', 'awesome_plugin_init');
+
+// Activation hook
+register_activation_hook(__FILE__, function() {
+    // Clear any existing caches on activation
+    delete_transient(AWESOME_PLUGIN_SLUG . '_license_details');
+    delete_transient(AWESOME_PLUGIN_SLUG . '_update_check');
+});
+
+// Deactivation hook
+register_deactivation_hook(__FILE__, function() {
+    // Clear caches on deactivation
+    delete_transient(AWESOME_PLUGIN_SLUG . '_license_details');
+    delete_transient(AWESOME_PLUGIN_SLUG . '_update_check');
+});

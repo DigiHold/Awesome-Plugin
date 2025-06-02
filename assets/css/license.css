@@ -1,110 +1,249 @@
-.plugin-license-box {
-  max-width: 800px;
-  margin: 20px 0;
-  background: #fff;
-  border: 1px solid #ccd0d4;
-  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04);
+/**
+ * License Management Styles for DigiCommerce Licensing System
+ * Provides clean, professional styling for the license management interface
+ */
+
+/* Main license management container */
+.wrap .card {
+    max-width: none;
+    margin-bottom: 20px;
 }
 
-.plugin-license-box .license-header {
-  padding: 12px 15px;
-  border-bottom: 1px solid #ccd0d4;
-  background: #f8f9f9;
+.wrap .card h2 {
+    margin-top: 0;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #e1e1e1;
+    color: #23282d;
 }
 
-.plugin-license-box .license-header h2 {
-  margin: 0;
-  font-size: 14px;
-  line-height: 1.4;
+/* License form styling */
+#license-form {
+    margin-top: 20px;
 }
 
-.plugin-license-box .license-body {
-  padding: 15px;
+#license-form .form-table {
+    margin-bottom: 20px;
 }
 
-.plugin-license-box .license-info > div {
-  margin-bottom: 10px;
+#license-form .regular-text {
+    width: 400px;
+    padding: 8px 12px;
+    font-size: 14px;
+    line-height: 1.5;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background-color: #fff;
+    transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
 }
 
-.plugin-license-box .license-info label {
-  display: inline-block;
-  min-width: 100px;
-  font-weight: 600;
+#license-form .regular-text:focus {
+    border-color: #007cba;
+    box-shadow: 0 0 0 1px #007cba;
+    outline: none;
 }
 
-.plugin-license-box .license-info code {
-  padding: 3px 5px;
-  font-size: 13px;
-  background: #f0f0f1;
-  border-radius: 3px;
+/* License status indicators */
+.license-status {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.5px;
 }
 
-.plugin-license-box .status-active {
-  color: #46b450;
-  font-weight: 500;
+.license-active {
+    background-color: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
 }
 
-.plugin-license-box .status-invalid {
-  color: #dc3232;
-  font-weight: 500;
+.license-expired,
+.license-invalid {
+    background-color: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
 }
 
-.plugin-license-box form label {
-  display: block;
-  margin-bottom: 5px;
-  font-weight: 600;
+.license-inactive {
+    background-color: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffeaa7;
 }
 
-.plugin-license-box form input[type="text"] {
-  margin-bottom: 15px;
+/* Button styling improvements */
+.button.updating-message {
+    color: #666;
+    background: #f7f7f7;
+    border-color: #ddd;
+    cursor: default;
 }
 
-.plugin-license-box .license-actions {
-  margin-top: 20px;
-  padding-top: 15px;
-  border-top: 1px solid #eee;
+.button.updating-message:before {
+    content: "";
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    margin-right: 8px;
+    background: url('data:image/svg+xml;charset=utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="%23666" d="M12,1A11,11,0,1,0,23,12,11,11,0,0,0,12,1Zm0,19a8,8,0,1,1,8-8A8,8,0,0,1,12,20Z" opacity=".25"/><path fill="%23666" d="M12,4a8,8,0,0,1,7.89,6.7A1.53,1.53,0,0,0,21.38,12h0a1.5,1.5,0,0,0,1.48-1.75,11,11,0,0,0-21.72,0A1.5,1.5,0,0,0,2.62,12h0a1.53,1.53,0,0,0,1.49-1.3A8,8,0,0,1,12,4Z"><animateTransform attributeName="transform" dur="0.75s" repeatCount="indefinite" type="rotate" values="0 12 12;360 12 12"/></path></svg>') no-repeat center center;
+    background-size: 16px 16px;
+    vertical-align: middle;
 }
 
-.plugin-license-box .license-actions button {
-  margin-right: 10px;
+/* License information display */
+.form-table th {
+    font-weight: 600;
+    color: #23282d;
+    padding: 15px 10px 15px 0;
 }
 
+.form-table td {
+    padding: 15px 10px;
+}
+
+.form-table code {
+    background: #f1f1f1;
+    color: #666;
+    padding: 4px 8px;
+    border-radius: 3px;
+    font-family: Consolas, Monaco, monospace;
+    font-size: 13px;
+}
+
+/* Plugin information section */
+.form-table td .dashicons {
+    vertical-align: middle;
+    margin-right: 5px;
+}
+
+/* Responsive improvements */
+@media (max-width: 782px) {
+    #license-form .regular-text {
+        width: 100%;
+        max-width: 400px;
+    }
+    
+    .form-table th,
+    .form-table td {
+        display: block;
+        width: auto;
+        padding: 10px 0;
+    }
+    
+    .form-table th {
+        border-bottom: none;
+    }
+}
+
+/* Loading animation for buttons */
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Submit button area */
+.submit {
+    padding: 0;
+    margin: 20px 0 0;
+}
+
+/* Description text styling */
+.description {
+    color: #666;
+    font-style: italic;
+    margin-top: 5px !important;
+}
+
+/* License key display improvements */
+.license-key-display {
+    font-family: 'Courier New', Courier, monospace;
+    background: #f9f9f9;
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    display: inline-block;
+    margin-right: 10px;
+}
+
+/* Action buttons container */
+.license-actions {
+    margin-top: 15px;
+}
+
+.license-actions .button {
+    margin-right: 10px;
+    margin-bottom: 5px;
+}
+
+/* Success/Error message styling */
 .license-message {
-  margin: 20px 0;
-  padding: 12px 15px;
-  border-left: 4px solid #fff;
-  background: #fff;
-  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04);
+    padding: 15px;
+    margin: 15px 0;
+    border-radius: 4px;
+    font-weight: 500;
 }
 
-.license-message.message-success {
-  border-left-color: #46b450;
+.license-message.success {
+    background-color: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
 }
 
-.license-message.message-error {
-  border-left-color: #dc3232;
+.license-message.error {
+    background-color: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
 }
 
-.license-message.message-info {
-  border-left-color: #00a0d2;
+.license-message.info {
+    background-color: #d1ecf1;
+    color: #0c5460;
+    border: 1px solid #bee5eb;
 }
 
-/* Loading state */
-.plugin-license-box button:disabled {
-  cursor: not-allowed;
-  opacity: 0.7;
+/* Plugin status indicators */
+.plugin-status {
+    display: flex;
+    align-items: center;
+    margin: 5px 0;
 }
 
-/* Improved responsive design */
-@media screen and (max-width: 782px) {
-  .plugin-license-box .license-info label {
-    display: block;
-    margin-bottom: 4px;
-  }
+.plugin-status .dashicons {
+    margin-right: 8px;
+    width: 16px;
+    height: 16px;
+    font-size: 16px;
+}
 
-  .plugin-license-box .license-actions button {
-    display: block;
-    width: 100%;
-    margin: 0 0 10px;
-  }
+.plugin-status .status-text {
+    font-weight: 500;
+}
+
+/* Form validation styling */
+.form-field-error input {
+    border-color: #dc3232 !important;
+    box-shadow: 0 0 0 1px #dc3232 !important;
+}
+
+.form-field-error .description {
+    color: #dc3232;
+    font-weight: 500;
+}
+
+/* Accessibility improvements */
+.screen-reader-text {
+    clip: rect(1px, 1px, 1px, 1px);
+    position: absolute !important;
+    height: 1px;
+    width: 1px;
+    overflow: hidden;
+}
+
+/* Focus styles for better accessibility */
+.button:focus,
+input[type="text"]:focus,
+input[type="password"]:focus {
+    outline: 2px solid #007cba;
+    outline-offset: 2px;
 }
