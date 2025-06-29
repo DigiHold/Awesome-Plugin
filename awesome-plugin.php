@@ -1,14 +1,28 @@
 <?php
 /**
  * Plugin Name: Awesome Plugin
- * Description: Helper plugin for DigiCommerce license checker
+ * Description: Helper plugin for license checker
  * Version: 1.0.0
- * Author: DigiCommerce
- * Author URI: https://digicommerce.me
+ * Author: DigiHold
+ * Author URI: https://digihold.me
  * Text Domain: awesome-plugin
  * Domain Path: /languages
  * Requires at least: 5.8
  * Requires PHP: 7.4
+ * 
+ * SETUP INSTRUCTIONS:
+ * 1. Create the following folder structure in your plugin directory:
+ *    /assets/
+ *    /assets/css/
+ *    /assets/js/
+ * 
+ * 2. Add the provided license.css file to /assets/css/license.css
+ * 3. Add the provided license.js file to /assets/js/license.js
+ * 
+ * 4. Update the constants below for your product:
+ *    - AWESOME_API_URL: Your DigiCommerce site URL
+ *    - AWESOME_PLUGIN_SLUG: Your product slug (must match your product in DigiCommerce)
+ *    - AWESOME_PLUGIN_NAME: Display name for your plugin
  */
 
 // Prevent direct access
@@ -92,6 +106,7 @@ class Awesome_Plugin_License_Manager {
         add_action('upgrader_process_complete', array($this, 'clear_update_caches'), 10, 2);
         add_action('activated_plugin', array($this, 'clear_license_cache'));
         add_action('deactivated_plugin', array($this, 'clear_license_cache'));
+        add_action('admin_init', array($this, 'maybe_clear_transients_on_version_change'));
     }
 
     /**
@@ -115,23 +130,26 @@ class Awesome_Plugin_License_Manager {
             return;
         }
 
+        // Enqueue CSS file
         wp_enqueue_style(
-            $this->product_slug . '-admin',
+            $this->product_slug . '-license-admin',
             AWESOME_PLUGIN_URL . 'assets/css/license.css',
             array(),
             $this->version
         );
 
+        // Enqueue JavaScript file
         wp_enqueue_script(
-            $this->product_slug . '-admin',
+            $this->product_slug . '-license-admin',
             AWESOME_PLUGIN_URL . 'assets/js/license.js',
             array(),
             $this->version,
             true
         );
 
+        // Localize script with data
         wp_localize_script(
-            $this->product_slug . '-admin',
+            $this->product_slug . '-license-admin',
             'awesomeLicense',
             array(
                 'ajaxUrl' => admin_url('admin-ajax.php'),
@@ -152,8 +170,10 @@ class Awesome_Plugin_License_Manager {
         );
     }
 
+
+
     /**
-     * Make API request
+     * Make API request - Following DigiCommerce pattern
      */
     private function make_api_request($endpoint, $body = array()) {
         // Always include product slug for validation (this is the key fix!)
@@ -200,6 +220,46 @@ class Awesome_Plugin_License_Manager {
         }
 
         return false;
+    }
+
+    /**
+     * Get bundle information if this is a bundle license
+     */
+    private function get_bundle_products() {
+        $license = $this->get_license_details();
+        if (!$license || 'active' !== $license['status']) {
+            return false;
+        }
+
+        $license_key = get_option($this->product_slug . '_license_key');
+        if (!$license_key) {
+            return false;
+        }
+
+        // Make API request to get bundle products
+        $response = $this->make_api_request(
+            'license/bundle-products',
+            array(
+                'license_key' => $license_key,
+                'site_url'    => home_url(),
+            )
+        );
+
+        if (is_wp_error($response)) {
+            return false;
+        }
+
+        $bundle_data = json_decode(wp_remote_retrieve_body($response), true);
+        
+        return isset($bundle_data['products']) ? $bundle_data['products'] : false;
+    }
+
+    /**
+     * Check if this is a bundle/master license
+     */
+    private function is_bundle_license() {
+        $bundle_products = $this->get_bundle_products();
+        return !empty($bundle_products) && is_array($bundle_products) && count($bundle_products) > 1;
     }
 
     /**
@@ -287,6 +347,7 @@ class Awesome_Plugin_License_Manager {
         if (!empty($result['status']) && 'success' === $result['status']) {
             update_option($this->product_slug . '_license_key', $license_key);
             delete_transient($this->product_slug . '_license_details');
+            delete_transient($this->product_slug . '_update_check');
             wp_send_json_success(array('message' => __('License activated successfully!', 'awesome-plugin')));
         }
 
@@ -327,6 +388,7 @@ class Awesome_Plugin_License_Manager {
             delete_option($this->product_slug . '_license_key');
             delete_option($this->product_slug . '_license_status');
             delete_transient($this->product_slug . '_license_details');
+            delete_transient($this->product_slug . '_update_check');
             wp_send_json_success(array('message' => __('License deactivated successfully!', 'awesome-plugin')));
         }
 
@@ -432,10 +494,12 @@ class Awesome_Plugin_License_Manager {
             return $transient;
         }
 
-        // Only check once per 12 hours.
-        $last_check = get_transient($this->product_slug . '_update_check');
-        if (false !== $last_check) {
-            return $transient;
+        // Check if this is a forced update check
+        $force_check = false;
+        if (isset($_GET['force-check']) || 
+            (isset($_POST['action']) && $_POST['action'] === 'update-core') ||
+            (wp_doing_ajax() && isset($_POST['action']) && $_POST['action'] === 'update-plugin')) {
+            $force_check = true;
         }
 
         // Verify license first.
@@ -444,12 +508,25 @@ class Awesome_Plugin_License_Manager {
             return $transient;
         }
 
+        // Check if plugin is in WordPress checked list
+        if (!isset($transient->checked[$this->basename])) {
+            return $transient;
+        }
+
+        if (!$force_check) {
+            $last_check = get_transient($this->product_slug . '_update_check');
+            if (false !== $last_check) {
+                return $transient;
+            }
+        }
+
         $response = $this->make_api_request(
             'license/updates',
             array(
                 'license_key' => get_option($this->product_slug . '_license_key'),
                 'site_url'    => home_url(),
                 'product_slug' => $this->product_slug,
+                'current_version' => $this->version,
             )
         );
 
@@ -468,15 +545,22 @@ class Awesome_Plugin_License_Manager {
             return $transient;
         }
 
-        if (!empty($update_data['new_version']) && version_compare($this->version, $update_data['new_version'], '<')) {
-            $transient->response[$this->basename] = (object) array(
-                'slug'        => $this->product_slug,
+        if (!empty($update_data['new_version']) && 
+            !empty($update_data['package']) && 
+            version_compare($this->version, $update_data['new_version'], '<')) {
+            
+            $update_object = (object) array(
+                'slug'        => dirname($this->basename),
                 'plugin'      => $this->basename,
+                'icons'       => $update_data['icons'] ?? array(),
                 'new_version' => $update_data['new_version'],
-                'package'     => $update_data['package'] ?? '',
+                'package'     => $update_data['package'],
                 'tested'      => $update_data['tested'] ?? '',
                 'requires'    => $update_data['requires'] ?? '',
+                'id'          => $this->basename,
             );
+            
+            $transient->response[$this->basename] = $update_object;
         }
 
         // Cache the check for 12 hours.
@@ -506,6 +590,7 @@ class Awesome_Plugin_License_Manager {
                 'license_key' => get_option($this->product_slug . '_license_key'),
                 'site_url'    => home_url(),
                 'product_slug' => $this->product_slug,
+                'current_version' => $this->version,
             )
         );
 
@@ -523,6 +608,48 @@ class Awesome_Plugin_License_Manager {
             return $result;
         }
 
+        // Format description, installation, and changelog
+        $description = '';
+        if (!empty($info['description'])) {
+            $description = $info['description'];
+            $description = str_replace('\n\n', "\n\n", $description);
+            $description = str_replace('\n', "\n", $description);
+            $description = preg_replace('/\* \n/', "* ", $description);
+            $description = preg_replace('/\s+/', ' ', $description);
+            $description = preg_replace('/\n(#+)/', "\n\n$1", $description);
+        }
+
+        $installation = '';
+        if (!empty($info['installation'])) {
+            $installation = $info['installation'];
+            $installation = str_replace('\n\n', "\n\n", $installation);
+            $installation = str_replace('\n', "\n", $installation);
+            $installation = preg_replace('/(\d+)\. \n/', "$1. ", $installation);
+        }
+
+        $changelog = '';
+        if (!empty($info['changelog']) && !empty($info['new_version'])) {
+            $changelog_items = explode("\n", str_replace('\n', "\n", $info['changelog']));
+            
+            $changelog = sprintf(
+                '<h4>%s</h4>' . "\n" .
+                '<p><em>%s %s</em></p>' . "\n" .
+                '<ul>' . "\n",
+                esc_html($info['new_version']),
+                esc_html__('Release Date:', 'awesome-plugin'),
+                esc_html(date_i18n(get_option('date_format')))
+            );
+
+            foreach ($changelog_items as $item) {
+                $item = trim($item);
+                if (!empty($item)) {
+                    $changelog .= sprintf('<li>%s</li>' . "\n", esc_html($item));
+                }
+            }
+
+            $changelog .= '</ul>';
+        }
+
         // Build response object
         $plugin_info = (object) array(
             'name'          => $this->plugin_name,
@@ -535,16 +662,23 @@ class Awesome_Plugin_License_Manager {
             'tested'        => $info['tested'] ?? '',
             'homepage'      => $info['homepage'] ?? '',
             'sections'      => array(
-                'description'    => $info['description'] ?? '',
-                'installation'   => $info['installation'] ?? '',
-                'changelog'      => $info['changelog'] ?? '',
-                'upgrade_notice' => $info['upgrade_notice'] ?? '',
+                'description'    => $description,
+                'installation'   => $installation,
+                'changelog'      => $changelog,
+                'upgrade_notice' => isset($info['upgrade_notice']) ? str_replace('\n', "\n", $info['upgrade_notice']) : '',
             ),
             'author'        => $info['author'] ?? '',
             'author_homepage' => $info['homepage'] ?? '',
             'banners'       => (array) ($info['banners'] ?? array()),
             'contributors'  => (array) ($info['contributors'] ?? array()),
         );
+
+        // Remove empty sections
+        foreach ($plugin_info->sections as $key => $section) {
+            if (empty($section)) {
+                unset($plugin_info->sections[$key]);
+            }
+        }
 
         return $plugin_info;
     }
@@ -570,6 +704,29 @@ class Awesome_Plugin_License_Manager {
         }
 
         delete_transient($this->product_slug . '_update_check');
+        delete_site_transient('update_plugins');
+    }
+
+    /**
+     * Check if version changed and clear transients if needed
+     */
+    public function maybe_clear_transients_on_version_change() {
+        $stored_version = get_option($this->product_slug . '_stored_version');
+        
+        if ($stored_version !== $this->version) {
+            $this->clear_license_cache();
+            delete_transient($this->product_slug . '_update_check');
+            delete_site_transient('update_plugins');
+            update_option($this->product_slug . '_stored_version', $this->version);
+        }
+    }
+
+    /**
+     * Check if pro features are allowed
+     */
+    public function has_pro_access() {
+        $license_status = get_option($this->product_slug . '_license_status');
+        return !empty($license_status['status']) && ($license_status['status'] === 'active' || $license_status['status'] === 'expired');
     }
 
     /**
@@ -579,11 +736,29 @@ class Awesome_Plugin_License_Manager {
         $license_data = $this->get_license_details();
         $license_key = get_option($this->product_slug . '_license_key');
         $is_active = $license_data && isset($license_data['status']) && 'active' === $license_data['status'];
+        $bundle_products = $this->get_bundle_products();
         ?>
         <div class="wrap">
             <h1><?php echo esc_html($this->plugin_name . ' ' . __('License Management', 'awesome-plugin')); ?></h1>
             
-            <div id="license-message" style="display: none;"></div>
+            <!-- Message container for JavaScript -->
+            <div id="license-message"></div>
+
+            <?php if ($is_active) : ?>
+                <div class="notice notice-success">
+                    <p>
+                        <span class="dashicons dashicons-yes" style="color: #46b450;"></span>
+                        <?php printf(__('Your %s license is active! Enjoy all the premium features.', 'awesome-plugin'), $this->plugin_name); ?>
+                    </p>
+                </div>
+            <?php else : ?>
+                <div class="notice notice-warning">
+                    <p>
+                        <span class="dashicons dashicons-warning" style="color: #ffb900;"></span>
+                        <?php printf(__('Please activate your %s license to access premium features and updates.', 'awesome-plugin'), $this->plugin_name); ?>
+                    </p>
+                </div>
+            <?php endif; ?>
 
             <div class="card">
                 <h2><?php _e('License Information', 'awesome-plugin'); ?></h2>
@@ -621,11 +796,11 @@ class Awesome_Plugin_License_Manager {
                     </form>
                 <?php else : ?>
                     <!-- Active License Information -->
-                    <table class="form-table">
+                    <table class="form-table license-info-table">
                         <tr>
                             <th scope="row"><?php _e('License Key:', 'awesome-plugin'); ?></th>
                             <td>
-                                <code><?php echo esc_html(substr($license_key, 0, 8) . str_repeat('*', 24)); ?></code>
+                                <code class="license-key-display"><?php echo esc_html(substr($license_key, 0, 8) . str_repeat('*', 24)); ?></code>
                             </td>
                         </tr>
                         <tr>
@@ -644,16 +819,29 @@ class Awesome_Plugin_License_Manager {
                             </td>
                         </tr>
                         <?php endif; ?>
+                        <?php if ($this->is_bundle_license() && !empty($bundle_products)) : ?>
+                        <tr>
+                            <th scope="row"><?php _e('Bundle Products:', 'awesome-plugin'); ?></th>
+                            <td>
+                                <ul>
+                                    <?php foreach ($bundle_products as $product_slug) : ?>
+                                        <li><?php echo esc_html(ucwords(str_replace('-', ' ', $product_slug))); ?></li>
+                                    <?php endforeach; ?>
+                                </ul>
+                                <p class="description"><?php _e('This is a bundle license that works for multiple products.', 'awesome-plugin'); ?></p>
+                            </td>
+                        </tr>
+                        <?php endif; ?>
                     </table>
 
-                    <p class="submit">
+                    <div class="license-actions">
                         <button type="button" id="verify-license" class="button button-secondary">
                             <?php _e('Verify License', 'awesome-plugin'); ?>
                         </button>
                         <button type="button" id="deactivate-license" class="button">
                             <?php _e('Deactivate License', 'awesome-plugin'); ?>
                         </button>
-                    </p>
+                    </div>
                 <?php endif; ?>
             </div>
 
@@ -668,27 +856,42 @@ class Awesome_Plugin_License_Manager {
                     <tr>
                         <th scope="row"><?php _e('Updates:', 'awesome-plugin'); ?></th>
                         <td>
-                            <?php if ($is_active) : ?>
-                                <span class="dashicons dashicons-yes" style="color: #46b450;"></span>
-                                <?php _e('Automatic updates enabled', 'awesome-plugin'); ?>
-                            <?php else : ?>
-                                <span class="dashicons dashicons-no" style="color: #dc3232;"></span>
-                                <?php _e('Activate license to enable updates', 'awesome-plugin'); ?>
-                            <?php endif; ?>
+                            <div class="plugin-status">
+                                <?php if ($is_active) : ?>
+                                    <span class="dashicons dashicons-yes" style="color: #46b450;"></span>
+                                    <span class="status-text"><?php _e('Automatic updates enabled', 'awesome-plugin'); ?></span>
+                                <?php else : ?>
+                                    <span class="dashicons dashicons-no" style="color: #dc3232;"></span>
+                                    <span class="status-text"><?php _e('Activate license to enable updates', 'awesome-plugin'); ?></span>
+                                <?php endif; ?>
+                            </div>
                         </td>
                     </tr>
                     <tr>
                         <th scope="row"><?php _e('Support:', 'awesome-plugin'); ?></th>
                         <td>
-                            <?php if ($is_active) : ?>
-                                <span class="dashicons dashicons-yes" style="color: #46b450;"></span>
-                                <?php _e('Premium support available', 'awesome-plugin'); ?>
-                            <?php else : ?>
-                                <span class="dashicons dashicons-no" style="color: #dc3232;"></span>
-                                <?php _e('Activate license to access support', 'awesome-plugin'); ?>
-                            <?php endif; ?>
+                            <div class="plugin-status">
+                                <?php if ($is_active) : ?>
+                                    <span class="dashicons dashicons-yes" style="color: #46b450;"></span>
+                                    <span class="status-text"><?php _e('Premium support available', 'awesome-plugin'); ?></span>
+                                <?php else : ?>
+                                    <span class="dashicons dashicons-no" style="color: #dc3232;"></span>
+                                    <span class="status-text"><?php _e('Activate license to access support', 'awesome-plugin'); ?></span>
+                                <?php endif; ?>
+                            </div>
                         </td>
                     </tr>
+                    <?php if ($this->is_bundle_license()) : ?>
+                    <tr>
+                        <th scope="row"><?php _e('License Type:', 'awesome-plugin'); ?></th>
+                        <td>
+                            <div class="plugin-status">
+                                <span class="dashicons dashicons-star-filled" style="color: #ffb900;"></span>
+                                <span class="status-text"><?php _e('Bundle License', 'awesome-plugin'); ?></span>
+                            </div>
+                        </td>
+                    </tr>
+                    <?php endif; ?>
                 </table>
             </div>
         </div>
@@ -717,3 +920,8 @@ register_deactivation_hook(__FILE__, function() {
     delete_transient(AWESOME_PLUGIN_SLUG . '_license_details');
     delete_transient(AWESOME_PLUGIN_SLUG . '_update_check');
 });
+
+// Helper function to check if features are enabled
+function awesome_plugin_has_pro_access() {
+    return Awesome_Plugin_License_Manager::instance()->has_pro_access();
+}
