@@ -170,8 +170,6 @@ class Awesome_Plugin_License_Manager {
         );
     }
 
-
-
     /**
      * Make API request - Following DigiCommerce pattern
      */
@@ -297,6 +295,15 @@ class Awesome_Plugin_License_Manager {
         }
 
         $license_data = json_decode(wp_remote_retrieve_body($response), true);
+
+        // Handle revoked licenses - remove all data immediately
+        if (!empty($license_data['status']) && 'revoked' === $license_data['status']) {
+            delete_option($this->product_slug . '_license_key');
+            delete_option($this->product_slug . '_license_status');
+            delete_transient($this->product_slug . '_license_details');
+            delete_transient($this->product_slug . '_update_check');
+            return false;
+        }
 
         // Cache the result for 12 hours.
         set_transient($this->product_slug . '_license_details', $license_data, self::LICENSE_CACHE_DURATION);
@@ -446,36 +453,45 @@ class Awesome_Plugin_License_Manager {
                 ));
             }
 
-            // Update stored data
-            $license_data = array(
-                'status'     => isset($response_data['status']) ? sanitize_text_field($response_data['status']) : 'invalid',
-                'expires_at' => isset($response_data['expires_at']) ? sanitize_text_field($response_data['expires_at']) : null,
-                'last_check' => current_time('mysql'),
-            );
+            $status = isset($response_data['status']) ? sanitize_text_field($response_data['status']) : 'invalid';
 
-            // If verification failed or license is invalid/expired
-            if ('active' !== $license_data['status'] || 
-                (!empty($license_data['expires_at']) && strtotime($license_data['expires_at']) < time())
-            ) {
-                // Delete all license data
+            // Handle revoked licenses - remove everything and stop pro features
+            if ('revoked' === $status) {
+                // Delete all license data for revoked licenses
                 delete_option($this->product_slug . '_license_key');
                 delete_option($this->product_slug . '_license_status');
                 delete_transient($this->product_slug . '_license_details');
                 delete_transient($this->product_slug . '_update_check');
 
                 wp_send_json_error(array( 
-                    'message' => __('License verification failed. Your license is no longer valid.', 'awesome-plugin')
+                    'message' => __('License has been revoked. All pro features have been disabled.', 'awesome-plugin')
                 ));
             }
+
+            // For active, expired, and invalid licenses, store the data (DON'T DELETE)
+            $license_data = array(
+                'status'     => $status,
+                'expires_at' => isset($response_data['expires_at']) ? sanitize_text_field($response_data['expires_at']) : null,
+                'last_check' => current_time('mysql'),
+            );
 
             // Update stored data and cache
             update_option($this->product_slug . '_license_status', $license_data);
             set_transient($this->product_slug . '_license_details', $license_data, self::LICENSE_CACHE_DURATION);
 
+            // Generate appropriate message based on status
+            if ('active' === $status) {
+                $message = __('License verified successfully. All pro features are enabled.', 'awesome-plugin');
+            } elseif ('expired' === $status) {
+                $message = __('License is expired but pro features will continue to work. Updates are disabled.', 'awesome-plugin');
+            } else {
+                $message = __('License verification completed. Some features may be limited.', 'awesome-plugin');
+            }
+
             wp_send_json_success(array(
-                'message' => __('License verified successfully.', 'awesome-plugin'),
+                'message' => $message,
                 'license' => array(
-                    'status'     => $license_data['status'],
+                    'status'     => $status,
                     'expires_at' => $license_data['expires_at'],
                     'key'        => $license_key,
                 ),
@@ -504,6 +520,8 @@ class Awesome_Plugin_License_Manager {
 
         // Verify license first.
         $license = $this->get_license_details();
+        
+        // CORRECTED: Only check for updates if license is ACTIVE (not expired)
         if (!$license || 'active' !== $license['status']) {
             return $transient;
         }
@@ -578,7 +596,7 @@ class Awesome_Plugin_License_Manager {
             return $result;
         }
 
-        // Verify license.
+        // Verify license - CORRECTED: Only provide update info for ACTIVE licenses
         $license = $this->get_license_details();
         if (!$license || 'active' !== $license['status']) {
             return $result;
@@ -726,7 +744,10 @@ class Awesome_Plugin_License_Manager {
      */
     public function has_pro_access() {
         $license_status = get_option($this->product_slug . '_license_status');
-        return !empty($license_status['status']) && ($license_status['status'] === 'active' || $license_status['status'] === 'expired');
+        
+        // Allow pro features for both active AND expired licenses
+        return !empty($license_status['status']) && 
+               in_array($license_status['status'], array('active', 'expired'));
     }
 
     /**
